@@ -12,6 +12,21 @@ pub enum RoundMode {
     Precision = 1, // Exact price predictions (Legends mode)
 }
 
+/// Insurance coverage trigger categories.
+#[contracttype]
+#[derive(Clone, Copy, Debug, PartialEq)]
+#[repr(u32)]
+pub enum InsuranceEvent {
+    OracleOutage = 0,
+    OracleDeviation = 1,
+    FallbackRefund = 2,
+}
+
+pub const CANCEL_REASON_GENERIC: u32 = 0;
+pub const CANCEL_REASON_ORACLE_OUTAGE: u32 = 1;
+pub const CANCEL_REASON_ORACLE_DEVIATION: u32 = 2;
+pub const CANCEL_REASON_FALLBACK_REFUND: u32 = 3;
+
 /// Runtime mode for the contract lifecycle
 #[contracttype]
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -128,6 +143,8 @@ pub enum DataKeyCore {
     EpochMintBudget,
     /// Early cash-out penalty in basis points. Unset = early cash-out disabled.
     EarlyCashoutBps,
+    /// Enables commit-reveal Up/Down batch betting; absent means legacy mode.
+    SealedBatchAuction,
     /// Fee incidence model: FeeOnPot (default) or FeeOnWinnings.
     FeeModel,
     /// Dispute window length in ledgers. 0 = no dispute window.
@@ -177,6 +194,10 @@ pub enum DataKeyScoped {
     PrecisionPosition(u64, Address),
     /// Per-user Precision commitment: (round_id, address) → PrecisionCommitment
     PrecisionCommitment(u64, Address),
+    /// Private sealed Up/Down order, materialized only at finalization.
+    SealedOrder(u64, Address),
+    /// Users with escrowed sealed orders for a round.
+    SealedOrderParticipants(u64),
     /// Ordered participant list for a round: round_id → Vec<Address>
     RoundParticipants(u64),
     /// Marker for a cancelled round: round_id → true
@@ -401,6 +422,17 @@ pub struct PrecisionCommitment {
     pub revealed: bool,
 }
 
+/// Escrowed Up/Down order for the optional sealed batch auction.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct SealedOrder {
+    pub hash: BytesN<32>,
+    pub amount: i128,
+    pub revealed: bool,
+    pub side: BetSide,
+    pub price_guess: u128,
+}
+
 #[contracttype]
 #[derive(Clone, Debug, PartialEq)]
 pub struct OraclePayload {
@@ -453,15 +485,15 @@ pub struct OracleHeartbeatRecord {
 #[contracttype]
 #[derive(Clone, Debug, PartialEq)]
 pub struct Round {
-    pub round_id: u64,       // Unique monotonically increasing round identifier
-    pub price_start: u128,   // Starting XLM price in stroops
-    pub start_ledger: u32,   // Ledger when round was created
-    pub start_timestamp: u64,  // Ledger timestamp when round was created
-    pub bet_end_ledger: u32, // Ledger when betting closes
-    pub end_ledger: u32,     // Ledger when round ends (~5s per ledger)
-    pub pool_up: i128,       // Total vXLM bet on UP
-    pub pool_down: i128,     // Total vXLM bet on DOWN
-    pub mode: RoundMode,     // Round mode: UpDown (0) or Precision (1)
+    pub round_id: u64,        // Unique monotonically increasing round identifier
+    pub price_start: u128,    // Starting XLM price in stroops
+    pub start_ledger: u32,    // Ledger when round was created
+    pub start_timestamp: u64, // Ledger timestamp when round was created
+    pub bet_end_ledger: u32,  // Ledger when betting closes
+    pub end_ledger: u32,      // Ledger when round ends (~5s per ledger)
+    pub pool_up: i128,        // Total vXLM bet on UP
+    pub pool_down: i128,      // Total vXLM bet on DOWN
+    pub mode: RoundMode,      // Round mode: UpDown (0) or Precision (1)
 }
 
 /// Aggregated active-round pool composition for frontend transparency.
